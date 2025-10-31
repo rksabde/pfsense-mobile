@@ -8,6 +8,9 @@ const { authenticate, login } = require('./middleware/auth');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy - required when running behind nginx
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(helmet());
 app.use(cors());
@@ -16,7 +19,9 @@ app.use(express.json());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false
 });
 app.use(limiter);
 
