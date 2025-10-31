@@ -4,15 +4,18 @@ const https = require('https');
 class PfSenseService {
   constructor() {
     this.baseURL = process.env.PFSENSE_URL;
-    this.apiKey = process.env.PFSENSE_API_KEY;
-    this.apiSecret = process.env.PFSENSE_API_SECRET;
+    this.username = process.env.PFSENSE_USERNAME;
+    this.password = process.env.PFSENSE_PASSWORD;
     this.blockedAliasName = process.env.BLOCKED_ALIAS_NAME || 'BLOCKED';
+
+    // Create base64 encoded credentials for Basic auth
+    const credentials = Buffer.from(`${this.username}:${this.password}`).toString('base64');
 
     // Create axios instance with custom config
     this.client = axios.create({
       baseURL: `${this.baseURL}/api/v2`,
       headers: {
-        'Authorization': `${this.apiKey} ${this.apiSecret}`,
+        'Authorization': `Basic ${credentials}`,
         'Content-Type': 'application/json'
       },
       httpsAgent: new https.Agent({

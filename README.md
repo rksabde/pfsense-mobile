@@ -23,7 +23,7 @@ A mobile-first web application for managing pfSense router WiFi clients through 
 1. **pfSense Router**
    - pfSense installed and running
    - API v2 enabled (System > Advanced > Admin Access)
-   - API key and secret generated
+   - Admin username and password for webConfigurator access
 
 2. **Docker & Docker Compose**
    - Docker Engine installed
@@ -59,45 +59,43 @@ Edit `.env` with your settings:
 ```env
 # pfSense Configuration
 PFSENSE_URL=https://192.168.1.1
-PFSENSE_API_KEY=your_api_key_here
-PFSENSE_API_SECRET=your_api_secret_here
+PFSENSE_USERNAME=admin
+PFSENSE_PASSWORD=your_pfsense_password
 
 # Application Configuration
 ADMIN_PASSWORD=your_secure_password
 BLOCKED_ALIAS_NAME=BLOCKED
 ```
 
-### 3. Get pfSense API Credentials
+### 3. Configure pfSense Authentication
 
-1. Log into pfSense web interface
-2. Go to **System > User Manager**
-3. Create or edit a user with necessary privileges
-4. Scroll down to **API Keys** section
-5. Click **+ Add** to generate API key/secret
-6. Copy the key and secret to your `.env` file
+The application uses **Basic Authentication** to connect to pfSense API v2.
 
-Required privileges for API user:
-- Firewall: Aliases
-- DHCP Server
-- Diagnostics: ARP Table
-- Status: System
+1. Use your pfSense webConfigurator credentials (username and password)
+2. Default username is typically `admin`
+3. Enter your pfSense admin password in the `.env` file
+4. Make sure the user has necessary privileges:
+   - Firewall: Aliases
+   - DHCP Server
+   - Diagnostics: ARP Table
+   - Status: System
 
 ### 4. Build and Run with Docker Compose
 
 ```bash
 # Build the containers
-docker-compose build
+docker compose build
 
 # Start the application
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 ```
 
 The application will be available at:
 - **Frontend**: http://localhost:8080
-- **Backend API**: http://localhost:3000
+- **Backend API**: http://localhost:3001
 
 ### 5. Access the Application
 

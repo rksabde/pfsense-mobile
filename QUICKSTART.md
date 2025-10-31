@@ -10,16 +10,7 @@ Get your pfSense WiFi Manager running in 5 minutes!
 4. Check **Enable API**
 5. Click **Save**
 
-## Step 2: Generate API Credentials
-
-1. Go to **System > User Manager**
-2. Click on **admin** user (or create new user)
-3. Scroll to **API Keys** section
-4. Click **+ Add**
-5. Copy the **Client ID** (API Key) and **Token** (API Secret)
-6. Store them securely (you'll need them in Step 4)
-
-## Step 3: Create BLOCKED Alias
+## Step 2: Create BLOCKED Alias
 
 1. Go to **Firewall > Aliases**
 2. Click **+ Add**
@@ -30,7 +21,7 @@ Get your pfSense WiFi Manager running in 5 minutes!
 4. Click **Save**
 5. Click **Apply Changes**
 
-## Step 4: Create Firewall Rule (Important!)
+## Step 3: Create Firewall Rule (Important!)
 
 1. Go to **Firewall > Rules**
 2. Select your LAN interface (or WiFi interface)
@@ -44,7 +35,7 @@ Get your pfSense WiFi Manager running in 5 minutes!
 5. Click **Save**
 6. Click **Apply Changes**
 
-## Step 5: Configure Application
+## Step 4: Configure Application
 
 1. Create `.env` file:
    ```bash
@@ -54,26 +45,28 @@ Get your pfSense WiFi Manager running in 5 minutes!
 2. Edit `.env` with your details:
    ```env
    PFSENSE_URL=https://192.168.1.1
-   PFSENSE_API_KEY=your_client_id_from_step_2
-   PFSENSE_API_SECRET=your_token_from_step_2
+   PFSENSE_USERNAME=admin
+   PFSENSE_PASSWORD=your_pfsense_password
    ADMIN_PASSWORD=choose_a_strong_password
    BLOCKED_ALIAS_NAME=BLOCKED
    ```
 
-## Step 6: Start the Application
+**Note**: Use your pfSense webConfigurator username and password (the same credentials you use to log into pfSense web interface).
+
+## Step 5: Start the Application
 
 ```bash
 # Build and start
-docker-compose up -d
+docker compose up -d
 
 # Check status
-docker-compose ps
+docker compose ps
 
 # View logs (optional)
-docker-compose logs -f
+docker compose logs -f
 ```
 
-## Step 7: Access the Application
+## Step 6: Access the Application
 
 1. Open browser: `http://localhost:8080`
 2. Login with the password from your `.env` file
@@ -89,9 +82,10 @@ docker-compose logs -f
 
 ## Common Issues
 
-### "Authentication required" error
-- Check API key and secret are correct
-- Ensure they're properly copied without extra spaces
+### "Authentication required" or "401 Unauthorized" error
+- Check pfSense username and password are correct
+- Ensure they're properly entered in .env file without extra spaces
+- Verify the user has necessary privileges in pfSense
 
 ### "Failed to fetch clients"
 - Verify pfSense URL is correct
@@ -104,8 +98,8 @@ docker-compose logs -f
 - Ensure firewall rule references BLOCKED alias
 
 ### Cannot access application
-- Check Docker containers are running: `docker-compose ps`
-- Check logs: `docker-compose logs backend`
+- Check Docker containers are running: `docker compose ps`
+- Check logs: `docker compose logs backend`
 - Verify port 8080 is not in use by another application
 
 ## Next Steps
