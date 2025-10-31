@@ -7,10 +7,11 @@ services:
       dockerfile: Dockerfile
     container_name: pfsense-manager-backend
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "3001:3000"
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=3000
       - PFSENSE_URL=${PFSENSE_URL}
       - PFSENSE_USERNAME=${PFSENSE_USERNAME}
       - PFSENSE_PASSWORD=${PFSENSE_PASSWORD}
@@ -30,9 +31,3 @@ services:
       - "8080:80"
     depends_on:
       - backend
-    networks:
-      - pfsense-net
-
-networks:
-  pfsense-net:
-    driver: bridge

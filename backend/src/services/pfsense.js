@@ -24,7 +24,8 @@ class PfSenseService {
       baseURL: `${this.baseURL}/api/v2`,
       headers: {
         'Authorization': `Basic ${credentials}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
       httpsAgent: new https.Agent({
         rejectUnauthorized: false // For self-signed certificates
@@ -35,8 +36,8 @@ class PfSenseService {
   // Get all firewall aliases
   async getAliases() {
     try {
-      console.log(`Attempting to fetch aliases from: ${this.baseURL}/api/v2/firewall/alias`);
-      const response = await this.client.get('/firewall/alias');
+      console.log(`Attempting to fetch aliases from: ${this.baseURL}/api/v2/firewall/aliases`);
+      const response = await this.client.get('/firewall/aliases');
       return response.data;
     } catch (error) {
       console.error('Error fetching aliases:', error.message);
@@ -165,7 +166,7 @@ class PfSenseService {
   // Get DHCP leases (connected devices)
   async getDHCPLeases() {
     try {
-      const response = await this.client.get('/services/dhcpd/lease');
+      const response = await this.client.get('/status/dhcp_server/leases?limit=0&offset=0');
       return response.data;
     } catch (error) {
       console.error('Error fetching DHCP leases:', error.message);
@@ -176,7 +177,7 @@ class PfSenseService {
   // Get ARP table
   async getARPTable() {
     try {
-      const response = await this.client.get('/diagnostics/arp');
+      const response = await this.client.get('/diagnostics/arp_table');
       return response.data;
     } catch (error) {
       console.error('Error fetching ARP table:', error.message);
