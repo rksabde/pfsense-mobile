@@ -77,9 +77,10 @@ class PfSenseService {
         return [];
       }
 
-      // Parse address field (can be space or newline separated)
-      const addresses = blockedAlias.address ?
-        blockedAlias.address.split(/[\s\n]+/).filter(addr => addr.trim()) : [];
+      // Address field is already an array in pfSense API v2
+      const addresses = Array.isArray(blockedAlias.address)
+        ? blockedAlias.address.filter(addr => addr && addr.trim())
+        : [];
 
       return addresses;
     } catch (error) {
@@ -102,10 +103,10 @@ class PfSenseService {
       // Add new MAC to the list
       const updatedAddresses = [...currentBlocked, macAddress];
 
-      // Update the alias
-      await this.client.put('/firewall/alias', {
+      // Update the alias - send array directly as pfSense API expects
+      await this.client.put('/firewall/aliases', {
         name: this.blockedAliasName,
-        address: updatedAddresses.join(' '),
+        address: updatedAddresses,
         type: 'host',
         descr: 'Blocked devices managed by WiFi Manager'
       });
@@ -134,10 +135,10 @@ class PfSenseService {
       // Remove MAC from the list
       const updatedAddresses = currentBlocked.filter(mac => mac !== macAddress);
 
-      // Update the alias
-      await this.client.put('/firewall/alias', {
+      // Update the alias - send array directly as pfSense API expects
+      await this.client.put('/firewall/aliases', {
         name: this.blockedAliasName,
-        address: updatedAddresses.join(' '),
+        address: updatedAddresses,
         type: 'host',
         descr: 'Blocked devices managed by WiFi Manager'
       });
