@@ -8,6 +8,14 @@ class PfSenseService {
     this.password = process.env.PFSENSE_PASSWORD;
     this.blockedAliasName = process.env.BLOCKED_ALIAS_NAME || 'BLOCKED';
 
+    // Debug logging for environment variables
+    console.log('=== pfSense Service Configuration ===');
+    console.log('PFSENSE_URL:', this.baseURL || '(not set)');
+    console.log('PFSENSE_USERNAME:', this.username || '(not set)');
+    console.log('PFSENSE_PASSWORD:', this.password ? '***' + this.password.slice(-3) : '(not set)');
+    console.log('BLOCKED_ALIAS_NAME:', this.blockedAliasName);
+    console.log('=====================================');
+
     // Create base64 encoded credentials for Basic auth
     const credentials = Buffer.from(`${this.username}:${this.password}`).toString('base64');
 
@@ -27,10 +35,20 @@ class PfSenseService {
   // Get all firewall aliases
   async getAliases() {
     try {
+      console.log(`Attempting to fetch aliases from: ${this.baseURL}/api/v2/firewall/alias`);
       const response = await this.client.get('/firewall/alias');
       return response.data;
     } catch (error) {
       console.error('Error fetching aliases:', error.message);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', error.response.data);
+      } else if (error.request) {
+        console.error('No response received. Request details:', {
+          url: error.config?.url,
+          method: error.config?.method
+        });
+      }
       throw new Error('Failed to fetch aliases from pfSense');
     }
   }
