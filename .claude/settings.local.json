@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: pfSense WiFi Manager - Phase 1 complete\n\nImplemented mobile-first web application for managing pfSense router\nclients with block/unblock functionality.\n\nFeatures:\n- Backend API with pfSense API v2 integration\n- Vue.js frontend with responsive mobile-first design\n- Dashboard with network statistics\n- Connected clients page with block/unblock toggles\n- Blocked clients management page\n- Simple password authentication\n- Docker Compose deployment setup\n- Auto-refresh functionality\n- Comprehensive documentation\n\nTech Stack:\n- Backend: Node.js + Express\n- Frontend: Vue.js 3 + Vite + Pinia\n- Deployment: Docker + Docker Compose + Nginx\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(docker compose build:*)",
+      "Bash(docker compose:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ping:*)",
+      "Bash(docker exec:*)",
+      "Bash(curl -k -X GET http://localhost:8080/api/pfsense/aliases -H 'Authorization: Bearer changeme')",
+      "Bash(curl:*)",
+      "Bash(python3 -m json.tool)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

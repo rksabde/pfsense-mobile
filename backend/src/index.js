@@ -36,9 +36,11 @@ app.post('/api/auth/login', login);
 // Protected routes
 const clientsRouter = require('./routes/clients');
 const statsRouter = require('./routes/stats');
+const groupsRouter = require('./routes/groups');
 
 app.use('/api/clients', authenticate, clientsRouter);
 app.use('/api/stats', authenticate, statsRouter);
+app.use('/api/groups', authenticate, groupsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -57,10 +57,14 @@ class PfSenseService {
   // Get specific alias by name
   async getAlias(name) {
     try {
-      const response = await this.client.get(`/firewall/alias`, {
-        params: { name }
-      });
-      return response.data;
+      const aliases = await this.getAliases();
+      const alias = aliases.data?.find(a => a.name === name);
+
+      if (!alias) {
+        throw new Error(`Alias ${name} not found`);
+      }
+
+      return { data: alias };
     } catch (error) {
       console.error(`Error fetching alias ${name}:`, error.message);
       throw new Error(`Failed to fetch alias ${name}`);
@@ -92,23 +96,36 @@ class PfSenseService {
   // Add MAC address to BLOCKED alias
   async blockDevice(macAddress) {
     try {
-      // First get current blocked devices
-      const currentBlocked = await this.getBlockedDevices();
+      // Get the BLOCKED alias
+      const aliases = await this.getAliases();
+      const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
+
+      if (!blockedAlias) {
+        throw new Error('BLOCKED alias not found');
+      }
+
+      // Get current addresses
+      const currentAddresses = Array.isArray(blockedAlias.address)
+        ? blockedAlias.address.filter(addr => addr && addr.trim())
+        : [];
 
       // Check if already blocked
-      if (currentBlocked.includes(macAddress)) {
+      if (currentAddresses.includes(macAddress)) {
         return { success: true, message: 'Device already blocked' };
       }
 
       // Add new MAC to the list
-      const updatedAddresses = [...currentBlocked, macAddress];
+      const updatedAddresses = [...currentAddresses, macAddress];
 
-      // Update the alias - send array directly as pfSense API expects
-      await this.client.put('/firewall/aliases', {
-        name: this.blockedAliasName,
+      // Build detail array
+      const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
+      const updatedDetails = [...currentDetails, `Blocked on ${new Date().toISOString()}`];
+
+      // Update the alias - PATCH endpoint for single alias update
+      await this.client.patch('/firewall/alias', {
+        id: blockedAlias.id,
         address: updatedAddresses,
-        type: 'host',
-        descr: 'Blocked devices managed by WiFi Manager'
+        detail: updatedDetails
       });
 
       // Apply changes
@@ -124,23 +141,37 @@ class PfSenseService {
   // Remove MAC address from BLOCKED alias
   async unblockDevice(macAddress) {
     try {
-      // Get current blocked devices
-      const currentBlocked = await this.getBlockedDevices();
+      // Get the BLOCKED alias
+      const aliases = await this.getAliases();
+      const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
+
+      if (!blockedAlias) {
+        throw new Error('BLOCKED alias not found');
+      }
+
+      // Get current addresses
+      const currentAddresses = Array.isArray(blockedAlias.address)
+        ? blockedAlias.address.filter(addr => addr && addr.trim())
+        : [];
 
       // Check if device is in the list
-      if (!currentBlocked.includes(macAddress)) {
+      const index = currentAddresses.indexOf(macAddress);
+      if (index === -1) {
         return { success: true, message: 'Device not in blocked list' };
       }
 
       // Remove MAC from the list
-      const updatedAddresses = currentBlocked.filter(mac => mac !== macAddress);
+      const updatedAddresses = currentAddresses.filter(mac => mac !== macAddress);
 
-      // Update the alias - send array directly as pfSense API expects
-      await this.client.put('/firewall/aliases', {
-        name: this.blockedAliasName,
+      // Also remove corresponding detail entry
+      const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
+      const updatedDetails = currentDetails.filter((_, idx) => idx !== index);
+
+      // Update the alias - PATCH endpoint for single alias update
+      await this.client.patch('/firewall/alias', {
+        id: blockedAlias.id,
         address: updatedAddresses,
-        type: 'host',
-        descr: 'Blocked devices managed by WiFi Manager'
+        detail: updatedDetails
       });
 
       // Apply changes
@@ -259,6 +290,105 @@ class PfSenseService {
     } catch (error) {
       console.error('Error fetching interface stats:', error.message);
       throw new Error('Failed to fetch interface stats');
+    }
+  }
+
+  // Block an entire alias (add alias name to BLOCKED)
+  async blockAlias(aliasName) {
+    try {
+      // Get the BLOCKED alias
+      const aliases = await this.getAliases();
+      const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
+
+      if (!blockedAlias) {
+        throw new Error('BLOCKED alias not found');
+      }
+
+      // Get current addresses
+      const currentAddresses = Array.isArray(blockedAlias.address)
+        ? blockedAlias.address.filter(addr => addr && addr.trim())
+        : [];
+
+      // Check if already blocked
+      if (currentAddresses.includes(aliasName)) {
+        return { success: true, message: 'Alias already blocked' };
+      }
+
+      // Add alias name to the list
+      const updatedAddresses = [...currentAddresses, aliasName];
+
+      // Build detail array (same length as address array, empty strings for new entry)
+      const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
+      const updatedDetails = [...currentDetails, `Blocked on ${new Date().toISOString()}`];
+
+      // Update the alias - PATCH endpoint for single alias update
+      await this.client.patch('/firewall/alias', {
+        id: blockedAlias.id,
+        address: updatedAddresses,
+        detail: updatedDetails
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return { success: true, message: 'Alias blocked successfully' };
+    } catch (error) {
+      console.error('Error blocking alias:', error.message);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error('Failed to block alias');
+    }
+  }
+
+  // Unblock an entire alias (remove alias name from BLOCKED)
+  async unblockAlias(aliasName) {
+    try {
+      // Get the BLOCKED alias
+      const aliases = await this.getAliases();
+      const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
+
+      if (!blockedAlias) {
+        throw new Error('BLOCKED alias not found');
+      }
+
+      // Get current addresses
+      const currentAddresses = Array.isArray(blockedAlias.address)
+        ? blockedAlias.address.filter(addr => addr && addr.trim())
+        : [];
+
+      // Check if alias is in the list
+      const index = currentAddresses.indexOf(aliasName);
+      if (index === -1) {
+        return { success: true, message: 'Alias not in blocked list' };
+      }
+
+      // Remove alias from the list
+      const updatedAddresses = currentAddresses.filter(item => item !== aliasName);
+
+      // Also remove corresponding detail entry
+      const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
+      const updatedDetails = currentDetails.filter((_, idx) => idx !== index);
+
+      // Update the alias - PATCH endpoint for single alias update
+      await this.client.patch('/firewall/alias', {
+        id: blockedAlias.id,
+        address: updatedAddresses,
+        detail: updatedDetails
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return { success: true, message: 'Alias unblocked successfully' };
+    } catch (error) {
+      console.error('Error unblocking alias:', error.message);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error('Failed to unblock alias');
     }
   }
 }
