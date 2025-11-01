@@ -60,4 +60,57 @@ router.post('/:name/unblock', async (req, res) => {
   }
 });
 
+// Create new alias/group
+router.post('/', async (req, res) => {
+  try {
+    const { name, addresses, description } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Alias name is required' });
+    }
+
+    const result = await pfsense.createAlias(name, addresses || [], description || '');
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update existing alias/group
+router.put('/:name', async (req, res) => {
+  try {
+    const { name } = req.params;
+    const { addresses, description } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Alias name is required' });
+    }
+
+    if (!addresses || !Array.isArray(addresses)) {
+      return res.status(400).json({ success: false, error: 'Addresses array is required' });
+    }
+
+    const result = await pfsense.updateAlias(name, addresses, description || '');
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete alias/group
+router.delete('/:name', async (req, res) => {
+  try {
+    const { name } = req.params;
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Alias name is required' });
+    }
+
+    const result = await pfsense.deleteAlias(name);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;

@@ -408,6 +408,157 @@ class PfSenseService {
     console.warn('unblockAlias is deprecated, use blockIdentifier instead');
     return this.unblockIdentifier(aliasName);
   }
+
+  // Validate alias name
+  validateAliasName(name) {
+    if (!name || typeof name !== 'string') {
+      return { valid: false, error: 'Alias name is required' };
+    }
+
+    const trimmed = name.trim().toUpperCase();
+
+    // Check length
+    if (trimmed.length < 1 || trimmed.length > 32) {
+      return { valid: false, error: 'Alias name must be 1-32 characters' };
+    }
+
+    // Check characters (alphanumeric and underscore only)
+    if (!/^[A-Z0-9_]+$/.test(trimmed)) {
+      return { valid: false, error: 'Alias name can only contain letters, numbers, and underscores' };
+    }
+
+    return { valid: true, name: trimmed };
+  }
+
+  // Create new alias
+  async createAlias(name, addresses = [], description = '') {
+    try {
+      // Validate name
+      const validation = this.validateAliasName(name);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+
+      const aliasName = validation.name;
+
+      // Check if alias already exists
+      const aliases = await this.getAliases();
+      const exists = aliases.data?.some(a => a.name === aliasName);
+      if (exists) {
+        throw new Error(`Alias ${aliasName} already exists`);
+      }
+
+      // Ensure addresses is an array
+      const addressArray = Array.isArray(addresses) ? addresses : [addresses];
+
+      // Create detail array (empty strings for each address)
+      const detailArray = addressArray.map((_, i) => description || `Entry ${i + 1}`);
+
+      // Create the alias using POST
+      await this.client.post('/firewall/alias', {
+        name: aliasName,
+        type: 'host',
+        address: addressArray,
+        detail: detailArray,
+        descr: description
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return {
+        success: true,
+        message: `Alias ${aliasName} created successfully`,
+        alias: { name: aliasName, address: addressArray, descr: description }
+      };
+    } catch (error) {
+      console.error('Error creating alias:', error.message);
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error(`Failed to create alias: ${error.message}`);
+    }
+  }
+
+  // Update existing alias
+  async updateAlias(name, addresses, description) {
+    try {
+      // Get the alias
+      const aliases = await this.getAliases();
+      const alias = aliases.data?.find(a => a.name === name);
+
+      if (!alias) {
+        throw new Error(`Alias ${name} not found`);
+      }
+
+      // Ensure addresses is an array
+      const addressArray = Array.isArray(addresses) ? addresses : [addresses];
+
+      // Create detail array
+      const detailArray = addressArray.map((_, i) => description || `Entry ${i + 1}`);
+
+      // Update the alias using PATCH
+      await this.client.patch('/firewall/alias', {
+        id: alias.id,
+        address: addressArray,
+        detail: detailArray,
+        descr: description || alias.descr
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return {
+        success: true,
+        message: `Alias ${name} updated successfully`,
+        alias: { name, address: addressArray, descr: description || alias.descr }
+      };
+    } catch (error) {
+      console.error('Error updating alias:', error.message);
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error(`Failed to update alias: ${error.message}`);
+    }
+  }
+
+  // Delete alias
+  async deleteAlias(name) {
+    try {
+      // Safety check - prevent deletion of critical aliases
+      const protectedAliases = [this.blockedAliasName, 'WAN', 'LAN'];
+      if (protectedAliases.includes(name.toUpperCase())) {
+        throw new Error(`Cannot delete protected alias: ${name}`);
+      }
+
+      // Get the alias
+      const aliases = await this.getAliases();
+      const alias = aliases.data?.find(a => a.name === name);
+
+      if (!alias) {
+        throw new Error(`Alias ${name} not found`);
+      }
+
+      // Delete the alias using DELETE
+      await this.client.delete('/firewall/alias', {
+        data: { id: alias.id }
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return {
+        success: true,
+        message: `Alias ${name} deleted successfully`
+      };
+    } catch (error) {
+      console.error('Error deleting alias:', error.message);
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error(`Failed to delete alias: ${error.message}`);
+    }
+  }
 }
 
 module.exports = new PfSenseService();

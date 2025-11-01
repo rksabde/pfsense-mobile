@@ -24,6 +24,12 @@ const routes = [
     name: 'BlockedClients',
     component: () => import('../views/BlockedClientsView.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/groups',
+    name: 'Groups',
+    component: () => import('../views/GroupsView.vue'),
+    meta: { requiresAuth: true }
   }
 ];
 
