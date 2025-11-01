@@ -71,8 +71,8 @@ class PfSenseService {
     }
   }
 
-  // Get BLOCKED alias contents
-  async getBlockedDevices() {
+  // Get BLOCKED alias contents (IPs and alias names)
+  async getBlockedItems() {
     try {
       const aliases = await this.getAliases();
       const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
@@ -88,14 +88,86 @@ class PfSenseService {
 
       return addresses;
     } catch (error) {
-      console.error('Error getting blocked devices:', error.message);
+      console.error('Error getting blocked items:', error.message);
       throw error;
     }
   }
 
-  // Add MAC address to BLOCKED alias
-  async blockDevice(macAddress) {
+  // Legacy alias for backward compatibility
+  async getBlockedDevices() {
+    return this.getBlockedItems();
+  }
+
+  // Parse identifier to determine its type (IP, hostname, or alias)
+  parseIdentifier(identifier) {
+    if (!identifier || typeof identifier !== 'string') {
+      throw new Error('Invalid identifier');
+    }
+
+    const trimmed = identifier.trim();
+
+    // Check if it's an IP address
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (ipRegex.test(trimmed)) {
+      // Validate IP octets are 0-255
+      const octets = trimmed.split('.');
+      if (octets.every(octet => parseInt(octet) >= 0 && parseInt(octet) <= 255)) {
+        return { type: 'ip', value: trimmed };
+      }
+    }
+
+    // Check if it's all uppercase (likely an alias name)
+    if (trimmed === trimmed.toUpperCase() && /^[A-Z0-9_]+$/.test(trimmed)) {
+      return { type: 'alias', value: trimmed };
+    }
+
+    // Otherwise treat as hostname/FQDN
+    return { type: 'hostname', value: trimmed };
+  }
+
+  // Resolve identifier to something blockable (IP or alias name)
+  async resolveToBlockable(identifier) {
+    const parsed = this.parseIdentifier(identifier);
+
+    switch (parsed.type) {
+      case 'ip':
+        // IP is already blockable, just return it
+        return parsed.value;
+
+      case 'alias':
+        // Verify the alias exists
+        const aliases = await this.getAliases();
+        const aliasExists = aliases.data?.some(a => a.name === parsed.value);
+        if (!aliasExists) {
+          throw new Error(`Alias ${parsed.value} not found`);
+        }
+        return parsed.value;
+
+      case 'hostname':
+        // Look up hostname in DHCP leases to find IP
+        const dhcpLeases = await this.getDHCPLeases();
+        const lease = dhcpLeases.data?.find(l =>
+          l.hostname && l.hostname.toLowerCase() === parsed.value.toLowerCase()
+        );
+
+        if (!lease || !lease.ip) {
+          throw new Error(`Could not resolve hostname ${parsed.value} to IP address`);
+        }
+
+        return lease.ip;
+
+      default:
+        throw new Error(`Unknown identifier type: ${parsed.type}`);
+    }
+  }
+
+  // Unified block method - accepts IP, hostname, or alias
+  async blockIdentifier(identifier) {
     try {
+      // Resolve identifier to blockable value (IP or alias name)
+      const blockable = await this.resolveToBlockable(identifier);
+      const parsed = this.parseIdentifier(identifier);
+
       // Get the BLOCKED alias
       const aliases = await this.getAliases();
       const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
@@ -110,16 +182,20 @@ class PfSenseService {
         : [];
 
       // Check if already blocked
-      if (currentAddresses.includes(macAddress)) {
-        return { success: true, message: 'Device already blocked' };
+      if (currentAddresses.includes(blockable)) {
+        return {
+          success: true,
+          message: `${parsed.type === 'alias' ? 'Alias' : 'Device'} already blocked`,
+          blockable
+        };
       }
 
-      // Add new MAC to the list
-      const updatedAddresses = [...currentAddresses, macAddress];
+      // Add to the list
+      const updatedAddresses = [...currentAddresses, blockable];
 
       // Build detail array
       const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
-      const updatedDetails = [...currentDetails, `Blocked on ${new Date().toISOString()}`];
+      const updatedDetails = [...currentDetails, `Blocked ${parsed.type} on ${new Date().toISOString()}`];
 
       // Update the alias - PATCH endpoint for single alias update
       await this.client.patch('/firewall/alias', {
@@ -131,16 +207,25 @@ class PfSenseService {
       // Apply changes
       await this.applyChanges();
 
-      return { success: true, message: 'Device blocked successfully' };
+      return {
+        success: true,
+        message: `${parsed.type === 'alias' ? 'Alias' : 'Device'} blocked successfully`,
+        blockable,
+        type: parsed.type
+      };
     } catch (error) {
-      console.error('Error blocking device:', error.message);
-      throw new Error('Failed to block device');
+      console.error('Error blocking identifier:', error.message);
+      throw new Error(`Failed to block: ${error.message}`);
     }
   }
 
-  // Remove MAC address from BLOCKED alias
-  async unblockDevice(macAddress) {
+  // Unified unblock method - accepts IP, hostname, or alias
+  async unblockIdentifier(identifier) {
     try {
+      // Resolve identifier to blockable value (IP or alias name)
+      const blockable = await this.resolveToBlockable(identifier);
+      const parsed = this.parseIdentifier(identifier);
+
       // Get the BLOCKED alias
       const aliases = await this.getAliases();
       const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
@@ -154,14 +239,18 @@ class PfSenseService {
         ? blockedAlias.address.filter(addr => addr && addr.trim())
         : [];
 
-      // Check if device is in the list
-      const index = currentAddresses.indexOf(macAddress);
+      // Check if in the list
+      const index = currentAddresses.indexOf(blockable);
       if (index === -1) {
-        return { success: true, message: 'Device not in blocked list' };
+        return {
+          success: true,
+          message: `${parsed.type === 'alias' ? 'Alias' : 'Device'} not in blocked list`,
+          blockable
+        };
       }
 
-      // Remove MAC from the list
-      const updatedAddresses = currentAddresses.filter(mac => mac !== macAddress);
+      // Remove from the list
+      const updatedAddresses = currentAddresses.filter(item => item !== blockable);
 
       // Also remove corresponding detail entry
       const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
@@ -177,11 +266,27 @@ class PfSenseService {
       // Apply changes
       await this.applyChanges();
 
-      return { success: true, message: 'Device unblocked successfully' };
+      return {
+        success: true,
+        message: `${parsed.type === 'alias' ? 'Alias' : 'Device'} unblocked successfully`,
+        blockable,
+        type: parsed.type
+      };
     } catch (error) {
-      console.error('Error unblocking device:', error.message);
-      throw new Error('Failed to unblock device');
+      console.error('Error unblocking identifier:', error.message);
+      throw new Error(`Failed to unblock: ${error.message}`);
     }
+  }
+
+  // Legacy methods for backward compatibility
+  async blockDevice(macOrIp) {
+    console.warn('blockDevice is deprecated, use blockIdentifier instead');
+    return this.blockIdentifier(macOrIp);
+  }
+
+  async unblockDevice(macOrIp) {
+    console.warn('unblockDevice is deprecated, use unblockIdentifier instead');
+    return this.unblockIdentifier(macOrIp);
   }
 
   // Apply firewall changes
@@ -217,13 +322,13 @@ class PfSenseService {
     }
   }
 
-  // Get connected clients with block status
+  // Get connected clients with block status (now checks by IP, not MAC)
   async getConnectedClients() {
     try {
-      const [dhcpLeases, arpTable, blockedDevices] = await Promise.all([
+      const [dhcpLeases, arpTable, blockedItems] = await Promise.all([
         this.getDHCPLeases(),
         this.getARPTable(),
-        this.getBlockedDevices()
+        this.getBlockedItems()
       ]);
 
       // Combine DHCP and ARP data
@@ -240,7 +345,7 @@ class PfSenseService {
               ip: lease.ip,
               hostname: lease.hostname || 'Unknown',
               status: lease.state || 'active',
-              blocked: blockedDevices.includes(lease.mac),
+              blocked: lease.ip && blockedItems.includes(lease.ip), // Check by IP
               leaseEnd: lease.ends
             });
           }
@@ -257,7 +362,7 @@ class PfSenseService {
               ip: arp.ip,
               hostname: arp.hostname || 'Unknown',
               status: 'active',
-              blocked: blockedDevices.includes(arp.mac),
+              blocked: arp.ip && blockedItems.includes(arp.ip), // Check by IP
               interface: arp.interface
             });
           }
@@ -293,103 +398,15 @@ class PfSenseService {
     }
   }
 
-  // Block an entire alias (add alias name to BLOCKED)
+  // Legacy alias methods - redirect to unified methods
   async blockAlias(aliasName) {
-    try {
-      // Get the BLOCKED alias
-      const aliases = await this.getAliases();
-      const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
-
-      if (!blockedAlias) {
-        throw new Error('BLOCKED alias not found');
-      }
-
-      // Get current addresses
-      const currentAddresses = Array.isArray(blockedAlias.address)
-        ? blockedAlias.address.filter(addr => addr && addr.trim())
-        : [];
-
-      // Check if already blocked
-      if (currentAddresses.includes(aliasName)) {
-        return { success: true, message: 'Alias already blocked' };
-      }
-
-      // Add alias name to the list
-      const updatedAddresses = [...currentAddresses, aliasName];
-
-      // Build detail array (same length as address array, empty strings for new entry)
-      const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
-      const updatedDetails = [...currentDetails, `Blocked on ${new Date().toISOString()}`];
-
-      // Update the alias - PATCH endpoint for single alias update
-      await this.client.patch('/firewall/alias', {
-        id: blockedAlias.id,
-        address: updatedAddresses,
-        detail: updatedDetails
-      });
-
-      // Apply changes
-      await this.applyChanges();
-
-      return { success: true, message: 'Alias blocked successfully' };
-    } catch (error) {
-      console.error('Error blocking alias:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', JSON.stringify(error.response.data));
-      }
-      throw new Error('Failed to block alias');
-    }
+    console.warn('blockAlias is deprecated, use blockIdentifier instead');
+    return this.blockIdentifier(aliasName);
   }
 
-  // Unblock an entire alias (remove alias name from BLOCKED)
   async unblockAlias(aliasName) {
-    try {
-      // Get the BLOCKED alias
-      const aliases = await this.getAliases();
-      const blockedAlias = aliases.data?.find(alias => alias.name === this.blockedAliasName);
-
-      if (!blockedAlias) {
-        throw new Error('BLOCKED alias not found');
-      }
-
-      // Get current addresses
-      const currentAddresses = Array.isArray(blockedAlias.address)
-        ? blockedAlias.address.filter(addr => addr && addr.trim())
-        : [];
-
-      // Check if alias is in the list
-      const index = currentAddresses.indexOf(aliasName);
-      if (index === -1) {
-        return { success: true, message: 'Alias not in blocked list' };
-      }
-
-      // Remove alias from the list
-      const updatedAddresses = currentAddresses.filter(item => item !== aliasName);
-
-      // Also remove corresponding detail entry
-      const currentDetails = Array.isArray(blockedAlias.detail) ? blockedAlias.detail : [];
-      const updatedDetails = currentDetails.filter((_, idx) => idx !== index);
-
-      // Update the alias - PATCH endpoint for single alias update
-      await this.client.patch('/firewall/alias', {
-        id: blockedAlias.id,
-        address: updatedAddresses,
-        detail: updatedDetails
-      });
-
-      // Apply changes
-      await this.applyChanges();
-
-      return { success: true, message: 'Alias unblocked successfully' };
-    } catch (error) {
-      console.error('Error unblocking alias:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', JSON.stringify(error.response.data));
-      }
-      throw new Error('Failed to unblock alias');
-    }
+    console.warn('unblockAlias is deprecated, use blockIdentifier instead');
+    return this.unblockIdentifier(aliasName);
   }
 }
 

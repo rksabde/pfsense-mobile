@@ -37,7 +37,12 @@ app.post('/api/auth/login', login);
 const clientsRouter = require('./routes/clients');
 const statsRouter = require('./routes/stats');
 const groupsRouter = require('./routes/groups');
+const blockedRouter = require('./routes/blocked');
 
+// New unified blocking API
+app.use('/api/blocked', authenticate, blockedRouter);
+
+// Legacy routes (for backward compatibility)
 app.use('/api/clients', authenticate, clientsRouter);
 app.use('/api/stats', authenticate, statsRouter);
 app.use('/api/groups', authenticate, groupsRouter);

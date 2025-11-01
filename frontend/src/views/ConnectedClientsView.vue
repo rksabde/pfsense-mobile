@@ -107,8 +107,15 @@ const toggleBlock = async (client) => {
   processingMAC.value = client.mac;
 
   try {
+    // Use IP address for blocking (pfSense only accepts IP/alias/FQDN, not MAC)
+    if (!client.ip) {
+      error.value = 'Cannot block device without IP address';
+      processingMAC.value = '';
+      return;
+    }
+
     const endpoint = client.blocked ? 'unblock' : 'block';
-    const response = await axios.post(`/api/clients/${client.mac}/${endpoint}`);
+    const response = await axios.post(`/api/blocked/${encodeURIComponent(client.ip)}/${endpoint}`);
 
     if (response.data.success) {
       // Update local state

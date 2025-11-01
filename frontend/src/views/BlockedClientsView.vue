@@ -32,27 +32,27 @@
         </div>
 
         <div v-else class="clients-list">
-          <div v-for="client in blockedClients" :key="client.mac" class="client-card">
+          <div v-for="client in blockedClients" :key="client.value" class="client-card">
             <div class="client-info">
               <div class="client-header">
                 <h3 class="client-name">{{ client.hostname }}</h3>
-                <span :class="['status-badge', client.status === 'offline' ? 'offline' : 'blocked']">
-                  {{ client.status === 'offline' ? 'Offline' : 'Blocked' }}
+                <span :class="['status-badge', client.type === 'alias' ? 'alias' : (client.status === 'offline' ? 'offline' : 'blocked')]">
+                  {{ client.type === 'alias' ? 'Group' : (client.status === 'offline' ? 'Offline' : 'Blocked') }}
                 </span>
               </div>
 
               <div class="client-details">
                 <div class="detail-row">
+                  <span class="detail-label">{{ client.type === 'alias' ? 'Alias:' : 'IP:' }}</span>
+                  <span class="detail-value">{{ client.value }}</span>
+                </div>
+                <div v-if="client.mac" class="detail-row">
                   <span class="detail-label">MAC:</span>
                   <span class="detail-value">{{ client.mac }}</span>
                 </div>
-                <div class="detail-row">
-                  <span class="detail-label">IP:</span>
-                  <span class="detail-value">{{ client.ip || 'N/A' }}</span>
-                </div>
-                <div v-if="client.interface" class="detail-row">
-                  <span class="detail-label">Interface:</span>
-                  <span class="detail-value">{{ client.interface }}</span>
+                <div v-if="client.description" class="detail-row">
+                  <span class="detail-label">Info:</span>
+                  <span class="detail-value">{{ client.description }}</span>
                 </div>
               </div>
             </div>
@@ -61,9 +61,9 @@
               <button
                 @click="unblockDevice(client)"
                 class="unblock-btn"
-                :disabled="processingMAC === client.mac"
+                :disabled="processingItem === client.value"
               >
-                <svg v-if="processingMAC === client.mac" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="spinning">
+                <svg v-if="processingItem === client.value" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="spinning">
                   <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity="0.2"/>
                   <path d="M12 2a10 10 0 0110 10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
                 </svg>
@@ -87,40 +87,48 @@ import NavigationBar from '../components/NavigationBar.vue';
 const blockedClients = ref([]);
 const loading = ref(true);
 const error = ref('');
-const processingMAC = ref('');
+const processingItem = ref('');
 
 const fetchBlocked = async () => {
   loading.value = true;
   error.value = '';
 
   try {
-    const response = await axios.get('/api/clients/blocked');
+    const response = await axios.get('/api/blocked');
     if (response.data.success) {
-      blockedClients.value = response.data.data;
+      // Map to display format
+      blockedClients.value = response.data.data.map(item => ({
+        value: item.value,
+        type: item.type,
+        hostname: item.hostname || item.value,
+        mac: item.mac || null,
+        description: item.description || '',
+        status: item.mac ? 'active' : 'offline'
+      }));
     }
   } catch (err) {
-    error.value = err.response?.data?.error || 'Failed to load blocked clients';
+    error.value = err.response?.data?.error || 'Failed to load blocked items';
   } finally {
     loading.value = false;
   }
 };
 
 const unblockDevice = async (client) => {
-  processingMAC.value = client.mac;
+  processingItem.value = client.value;
 
   try {
-    const response = await axios.post(`/api/clients/${client.mac}/unblock`);
+    const response = await axios.post(`/api/blocked/${encodeURIComponent(client.value)}/unblock`);
 
     if (response.data.success) {
       // Remove from list
-      blockedClients.value = blockedClients.value.filter(c => c.mac !== client.mac);
+      blockedClients.value = blockedClients.value.filter(c => c.value !== client.value);
     } else {
-      error.value = response.data.error || 'Failed to unblock device';
+      error.value = response.data.error || 'Failed to unblock item';
     }
   } catch (err) {
-    error.value = err.response?.data?.error || 'Failed to unblock device';
+    error.value = err.response?.data?.error || 'Failed to unblock item';
   } finally {
-    processingMAC.value = '';
+    processingItem.value = '';
   }
 };
 
@@ -299,6 +307,11 @@ export default {
 .status-badge.offline {
   background: #f3f4f6;
   color: var(--text-secondary);
+}
+
+.status-badge.alias {
+  background: #dbeafe;
+  color: var(--primary-color);
 }
 
 .client-details {
