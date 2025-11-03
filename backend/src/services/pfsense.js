@@ -559,6 +559,365 @@ class PfSenseService {
       throw new Error(`Failed to delete alias: ${error.message}`);
     }
   }
+
+  // Get group block status - checks if group itself is blocked and individual member status
+  async getGroupBlockStatus(groupName, members) {
+    try {
+      const blockedItems = await this.getBlockedItems();
+
+      // Check if group alias itself is in BLOCKED
+      const groupBlocked = blockedItems.includes(groupName);
+
+      // Count individually blocked members
+      let individualBlocks = 0;
+      if (Array.isArray(members)) {
+        members.forEach(member => {
+          if (blockedItems.includes(member)) {
+            individualBlocks++;
+          }
+        });
+      }
+
+      const totalMembers = Array.isArray(members) ? members.length : 0;
+
+      // Determine overall status
+      let status = 'unblocked';
+      if (groupBlocked) {
+        status = 'blocked';  // Group itself is blocked (takes precedence)
+      } else if (individualBlocks > 0) {
+        status = 'partial';  // Some members individually blocked
+      }
+
+      return {
+        groupBlocked,
+        individualBlocks,
+        totalMembers,
+        status,
+        blockedMembers: members?.filter(m => blockedItems.includes(m)) || []
+      };
+    } catch (error) {
+      console.error('Error getting group block status:', error.message);
+      return {
+        groupBlocked: false,
+        individualBlocks: 0,
+        totalMembers: 0,
+        status: 'unknown',
+        blockedMembers: []
+      };
+    }
+  }
+
+  // Remove member from group/alias
+  async removeMemberFromAlias(aliasName, member) {
+    try {
+      // Get the alias
+      const aliases = await this.getAliases();
+      const alias = aliases.data?.find(a => a.name === aliasName);
+
+      if (!alias) {
+        throw new Error(`Alias ${aliasName} not found`);
+      }
+
+      // Get current members
+      const currentMembers = Array.isArray(alias.address) ? alias.address : [];
+
+      // Check if member exists
+      if (!currentMembers.includes(member)) {
+        throw new Error(`Member ${member} not found in ${aliasName}`);
+      }
+
+      // Remove the member
+      const updatedMembers = currentMembers.filter(m => m !== member);
+
+      // Update corresponding detail array
+      const memberIndex = currentMembers.indexOf(member);
+      const currentDetails = Array.isArray(alias.detail) ? alias.detail : [];
+      const updatedDetails = currentDetails.filter((_, idx) => idx !== memberIndex);
+
+      // Update the alias
+      await this.client.patch('/firewall/alias', {
+        id: alias.id,
+        address: updatedMembers,
+        detail: updatedDetails
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return {
+        success: true,
+        message: `Removed ${member} from ${aliasName}`,
+        remainingMembers: updatedMembers.length
+      };
+    } catch (error) {
+      console.error('Error removing member from alias:', error.message);
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error(`Failed to remove member: ${error.message}`);
+    }
+  }
+
+  // Add member to group/alias
+  async addMemberToAlias(aliasName, member) {
+    try {
+      // Get the alias
+      const aliases = await this.getAliases();
+      const alias = aliases.data?.find(a => a.name === aliasName);
+
+      if (!alias) {
+        throw new Error(`Alias ${aliasName} not found`);
+      }
+
+      // Get current members
+      const currentMembers = Array.isArray(alias.address) ? alias.address : [];
+
+      // Check if member already exists
+      if (currentMembers.includes(member)) {
+        throw new Error(`Member ${member} already exists in ${aliasName}`);
+      }
+
+      // Add the member
+      const updatedMembers = [...currentMembers, member];
+
+      // Add empty detail for the new member
+      const currentDetails = Array.isArray(alias.detail) ? alias.detail : [];
+      const updatedDetails = [...currentDetails, ''];
+
+      // Update the alias
+      await this.client.patch('/firewall/alias', {
+        id: alias.id,
+        address: updatedMembers,
+        detail: updatedDetails
+      });
+
+      // Apply changes
+      await this.applyChanges();
+
+      return {
+        success: true,
+        message: `Added ${member} to ${aliasName}`,
+        totalMembers: updatedMembers.length
+      };
+    } catch (error) {
+      console.error('Error adding member to alias:', error.message);
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error(`Failed to add member: ${error.message}`);
+    }
+  }
+
+  // Get DHCP static mappings
+  async getDHCPStaticMappings() {
+    try {
+      // Get mappings for LAN interface
+      const response = await this.client.get('/services/dhcp_server/static_mapping', {
+        params: { parent_id: 'lan' }
+      });
+      console.log('DHCP static mappings retrieved');
+      return response;
+    } catch (error) {
+      console.error('Error getting DHCP static mappings:', error.message);
+      throw new Error(`Failed to get DHCP static mappings: ${error.message}`);
+    }
+  }
+
+  // Create or update static DHCP mapping
+  async setStaticDHCPMapping(mac, ip, hostname) {
+    try {
+      // Validate IP is not in DHCP range
+      const dhcpStart = parseInt(process.env.DHCP_RANGE_START || '100');
+      const dhcpEnd = parseInt(process.env.DHCP_RANGE_END || '200');
+
+      const ipParts = ip.split('.');
+      const lastOctet = parseInt(ipParts[3]);
+
+      if (lastOctet >= dhcpStart && lastOctet <= dhcpEnd) {
+        throw new Error(`IP ${ip} is in DHCP range (${dhcpStart}-${dhcpEnd}). Choose an IP outside this range.`);
+      }
+
+      // Create static mapping
+      // parent_id is the interface name (e.g., "lan", "opt1", etc.)
+      const response = await this.client.post('/services/dhcp_server/static_mapping', {
+        parent_id: 'lan', // Default to LAN interface
+        mac: mac.toLowerCase(),
+        ipaddr: ip,
+        hostname: hostname || '',
+        descr: `Static mapping for ${hostname || mac}`,
+        arp_table_static_entry: false
+      });
+
+      // Note: Changes are NOT auto-applied. User must apply via pending changes notification.
+
+      console.log(`Static DHCP mapping created: ${mac} -> ${ip}`);
+      return {
+        success: true,
+        message: `Static IP ${ip} assigned to ${mac}. Apply changes to activate.`,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error setting static DHCP mapping:', error.message);
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data));
+      }
+      throw new Error(`Failed to set static DHCP mapping: ${error.message}`);
+    }
+  }
+
+  // Delete static DHCP mapping
+  async deleteStaticDHCPMapping(mac) {
+    try {
+      const response = await this.client.delete(`/services/dhcp_server/static_mapping`, {
+        data: { mac: mac.toLowerCase() }
+      });
+
+      // Note: Changes are NOT auto-applied. User must apply via pending changes notification.
+
+      console.log(`Static DHCP mapping deleted for ${mac}`);
+      return {
+        success: true,
+        message: `Static IP reservation removed for ${mac}. Apply changes to activate.`,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error deleting static DHCP mapping:', error.message);
+      throw new Error(`Failed to delete static DHCP mapping: ${error.message}`);
+    }
+  }
+
+  // Validate static IP
+  validateStaticIP(ip, currentIP) {
+    // Format check
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(ip)) {
+      return 'Invalid IP format';
+    }
+
+    // Range check (0-255 for each octet)
+    const parts = ip.split('.').map(Number);
+    if (parts.some(p => p < 0 || p > 255)) {
+      return 'IP octets must be between 0 and 255';
+    }
+
+    // DHCP range check
+    const lastOctet = parts[3];
+    const dhcpStart = parseInt(process.env.DHCP_RANGE_START || '100');
+    const dhcpEnd = parseInt(process.env.DHCP_RANGE_END || '200');
+
+    if (lastOctet >= dhcpStart && lastOctet <= dhcpEnd) {
+      return `IP is in DHCP range (${dhcpStart}-${dhcpEnd}). Choose outside this range.`;
+    }
+
+    // Subnet check (must be in same subnet)
+    if (currentIP) {
+      const currentParts = currentIP.split('.');
+      if (currentParts[0] !== parts[0].toString() ||
+          currentParts[1] !== parts[1].toString() ||
+          currentParts[2] !== parts[2].toString()) {
+        return 'IP must be in same subnet as current IP';
+      }
+    }
+
+    return null; // Valid
+  }
+
+  // Check DHCP pending changes
+  async getDHCPPendingChanges() {
+    try {
+      const response = await this.client.get('/services/dhcp_server/apply');
+      console.log('DHCP apply GET response:', JSON.stringify(response.data, null, 2));
+
+      // Check if DHCP changes are NOT applied (applied: false means pending changes)
+      const hasPending = response.data?.data?.applied === false;
+
+      console.log('DHCP hasPending:', hasPending);
+
+      return {
+        service: 'dhcp',
+        hasPending: hasPending,
+        count: hasPending ? 1 : 0
+      };
+    } catch (error) {
+      console.error('Error checking DHCP pending changes:', error.message);
+      return { service: 'dhcp', hasPending: false, count: 0 };
+    }
+  }
+
+  // Apply DHCP pending changes
+  async applyDHCPChanges() {
+    try {
+      await this.client.post('/services/dhcp_server/apply');
+      console.log('DHCP changes applied');
+      return { success: true, service: 'dhcp' };
+    } catch (error) {
+      console.error('Error applying DHCP changes:', error.message);
+      throw new Error(`Failed to apply DHCP changes: ${error.message}`);
+    }
+  }
+
+  // Check firewall pending changes
+  async getFirewallPendingChanges() {
+    try {
+      const response = await this.client.get('/firewall/apply');
+      console.log('Firewall apply GET response:', JSON.stringify(response.data, null, 2));
+
+      // Check if firewall changes are NOT applied or if there are pending subsystems
+      const applied = response.data?.data?.applied;
+      const pendingSubsystems = response.data?.data?.pending_subsystems || [];
+      const hasPending = (applied === false) || (pendingSubsystems.length > 0);
+
+      console.log('Firewall hasPending:', hasPending);
+
+      return {
+        service: 'firewall',
+        hasPending: hasPending,
+        count: hasPending ? 1 : 0
+      };
+    } catch (error) {
+      console.error('Error checking firewall pending changes:', error.message);
+      return { service: 'firewall', hasPending: false, count: 0 };
+    }
+  }
+
+  // Apply firewall changes (renamed from applyChanges for clarity)
+  async applyFirewallChanges() {
+    try {
+      await this.client.post('/firewall/apply');
+      console.log('Firewall changes applied');
+      return { success: true, service: 'firewall' };
+    } catch (error) {
+      console.error('Error applying firewall changes:', error.message);
+      throw new Error(`Failed to apply firewall changes: ${error.message}`);
+    }
+  }
+
+  // Get all pending changes across services
+  async getAllPendingChanges() {
+    try {
+      const [dhcp, firewall] = await Promise.all([
+        this.getDHCPPendingChanges(),
+        this.getFirewallPendingChanges()
+      ]);
+
+      const services = [dhcp, firewall].filter(s => s.hasPending);
+      const totalCount = services.reduce((sum, s) => sum + s.count, 0);
+
+      return {
+        hasPending: services.length > 0,
+        totalCount: totalCount,
+        services: services
+      };
+    } catch (error) {
+      console.error('Error getting all pending changes:', error.message);
+      throw new Error(`Failed to get pending changes: ${error.message}`);
+    }
+  }
+
+  // Keep original applyChanges for backward compatibility
+  async applyChanges() {
+    return this.applyFirewallChanges();
+  }
 }
 
 module.exports = new PfSenseService();

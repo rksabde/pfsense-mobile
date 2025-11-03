@@ -9,6 +9,41 @@
         <span class="brand-text">WiFi Manager</span>
       </div>
 
+      <!-- Bell Icon Notification -->
+      <div class="notification-wrapper">
+        <button @click="togglePanel" class="bell-btn" :class="{ active: pendingStore.hasPending }" title="Pending Changes">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span v-if="pendingStore.totalCount > 0" class="badge">{{ pendingStore.totalCount }}</span>
+        </button>
+
+        <!-- Expandable Panel -->
+        <div v-if="pendingStore.showPanel" class="pending-panel" @click.stop>
+          <div class="panel-header">
+            <h3>Pending Changes</h3>
+            <button @click="pendingStore.closePanel" class="close-btn">✕</button>
+          </div>
+
+          <div v-if="pendingStore.services.length === 0" class="no-changes">
+            No pending changes
+          </div>
+
+          <div v-else class="services-list">
+            <div v-for="service in pendingStore.services" :key="service.service" class="service-item">
+              <div class="service-info">
+                <span class="service-name">{{ formatServiceName(service.service) }}</span>
+                <span class="change-count">{{ service.count }} change(s)</span>
+              </div>
+              <button @click="applyService(service.service)" class="apply-btn" :disabled="pendingStore.loading">
+                {{ pendingStore.loading ? 'Applying...' : 'Apply' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <button @click="handleLogout" class="logout-btn">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -58,15 +93,56 @@
 
 <script setup>
 import { useRouter } from 'vue-router';
+import { onMounted, onUnmounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
+import { usePendingStore } from '../stores/pending';
 
 const router = useRouter();
 const authStore = useAuthStore();
+const pendingStore = usePendingStore();
 
 const handleLogout = () => {
   authStore.logout();
   router.push('/login');
 };
+
+const togglePanel = () => {
+  pendingStore.togglePanel();
+};
+
+const formatServiceName = (service) => {
+  const names = {
+    dhcp: 'DHCP Server',
+    firewall: 'Firewall'
+  };
+  return names[service] || service.toUpperCase();
+};
+
+const applyService = async (serviceName) => {
+  try {
+    await pendingStore.applyService(serviceName);
+    // Success - the store will update automatically
+  } catch (error) {
+    alert(`Failed to apply ${serviceName} changes: ${error.message}`);
+  }
+};
+
+// Close panel when clicking outside
+const handleClickOutside = (event) => {
+  if (pendingStore.showPanel && !event.target.closest('.notification-wrapper')) {
+    pendingStore.closePanel();
+  }
+};
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside);
+  // Initial check for pending changes
+  pendingStore.checkPending();
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside);
+});
 </script>
 
 <style scoped>
@@ -119,6 +195,165 @@ const handleLogout = () => {
 
 .logout-text {
   display: none;
+}
+
+/* Notification Bell */
+.notification-wrapper {
+  position: relative;
+  margin-left: auto;
+  margin-right: 1rem;
+}
+
+.bell-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bell-btn:hover,
+.bell-btn.active {
+  background: var(--bg-gray);
+  color: var(--primary-color);
+}
+
+.bell-btn.active svg {
+  animation: ring 0.5s ease-in-out;
+}
+
+@keyframes ring {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-15deg); }
+  75% { transform: rotate(15deg); }
+}
+
+.badge {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  background: var(--danger-color);
+  color: white;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.75rem;
+  min-width: 1rem;
+  text-align: center;
+}
+
+.pending-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 200;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  padding: 0.25rem;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
+}
+
+.no-changes {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.services-list {
+  padding: 0.5rem;
+}
+
+.service-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  background: var(--bg-gray);
+  margin-bottom: 0.5rem;
+}
+
+.service-item:last-child {
+  margin-bottom: 0;
+}
+
+.service-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.service-name {
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.change-count {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.apply-btn {
+  padding: 0.5rem 1rem;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.apply-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .bottom-nav {

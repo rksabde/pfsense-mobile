@@ -17,6 +17,8 @@ services:
       - PFSENSE_PASSWORD=${PFSENSE_PASSWORD}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - BLOCKED_ALIAS_NAME=${BLOCKED_ALIAS_NAME:-BLOCKED}
+      - DHCP_RANGE_START=${DHCP_RANGE_START:-100}
+      - DHCP_RANGE_END=${DHCP_RANGE_END:-200}
     volumes:
       - ./backend:/app
       - /app/node_modules

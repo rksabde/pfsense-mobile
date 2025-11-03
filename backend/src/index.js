@@ -38,9 +38,17 @@ const clientsRouter = require('./routes/clients');
 const statsRouter = require('./routes/stats');
 const groupsRouter = require('./routes/groups');
 const blockedRouter = require('./routes/blocked');
+const dhcpRouter = require('./routes/dhcp');
+const pendingRouter = require('./routes/pending');
 
 // New unified blocking API
 app.use('/api/blocked', authenticate, blockedRouter);
+
+// DHCP static mappings API
+app.use('/api/dhcp', authenticate, dhcpRouter);
+
+// Pending changes API
+app.use('/api/pending', authenticate, pendingRouter);
 
 // Legacy routes (for backward compatibility)
 app.use('/api/clients', authenticate, clientsRouter);
