@@ -177,4 +177,99 @@ router.delete('/:name/members/:member', async (req, res) => {
   }
 });
 
+// Get all groups that contain a specific client
+router.get('/client/:identifier', async (req, res) => {
+  try {
+    const { identifier } = req.params;
+
+    if (!identifier) {
+      return res.status(400).json({ success: false, error: 'Client identifier is required' });
+    }
+
+    // Get all aliases
+    const aliases = await pfsense.getAliases();
+    const aliasesData = aliases.data || [];
+
+    // Filter groups that contain this identifier
+    const clientGroups = aliasesData
+      .filter(alias => {
+        const members = alias.address || [];
+        return members.some(member =>
+          member === identifier ||
+          member.toLowerCase() === identifier.toLowerCase()
+        );
+      })
+      .map(alias => alias.name);
+
+    res.json({ success: true, data: clientGroups });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update client's group memberships (add/remove from multiple groups)
+router.post('/client/:identifier', async (req, res) => {
+  try {
+    const { identifier } = req.params;
+    const { groups } = req.body; // Array of group names to be member of
+
+    if (!identifier) {
+      return res.status(400).json({ success: false, error: 'Client identifier is required' });
+    }
+
+    if (!Array.isArray(groups)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Groups must be an array'
+      });
+    }
+
+    // Get all aliases
+    const aliases = await pfsense.getAliases();
+    const aliasesData = aliases.data || [];
+
+    // Protected groups that cannot be modified via this endpoint
+    const PROTECTED = ['BLOCKED', 'WAN', 'LAN'];
+
+    // For each group, add or remove the client
+    const updates = await Promise.all(
+      aliasesData.map(async (alias) => {
+        const shouldBeMember = groups.includes(alias.name);
+        const isMember = (alias.address || []).some(member =>
+          member === identifier || member.toLowerCase() === identifier.toLowerCase()
+        );
+
+        // Skip protected groups
+        if (PROTECTED.includes(alias.name)) {
+          return { group: alias.name, action: 'skipped', reason: 'protected' };
+        }
+
+        // Add member if needed
+        if (shouldBeMember && !isMember) {
+          await pfsense.addMemberToGroup(alias.name, identifier);
+          return { group: alias.name, action: 'added' };
+        }
+
+        // Remove member if needed
+        if (!shouldBeMember && isMember) {
+          await pfsense.removeMemberFromGroup(alias.name, identifier);
+          return { group: alias.name, action: 'removed' };
+        }
+
+        return { group: alias.name, action: 'unchanged' };
+      })
+    );
+
+    const summary = updates.filter(u => u.action !== 'unchanged' && u.action !== 'skipped');
+
+    res.json({
+      success: true,
+      message: `Updated ${summary.length} groups`,
+      data: summary
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;

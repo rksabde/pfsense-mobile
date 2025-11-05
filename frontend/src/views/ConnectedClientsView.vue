@@ -68,20 +68,79 @@
             </div>
 
             <div class="client-actions">
-              <button
-                @click="toggleAddToGroup(client)"
-                class="icon-btn add-to-group-btn"
-                :disabled="processingAdd === client.ip"
-                title="Add to group"
-              >
-                <svg v-if="processingAdd === client.ip" class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" opacity="0.25"/>
-                  <path d="M12 2a10 10 0 0110 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </button>
+              <!-- Group Manager Button with Panel -->
+              <div class="group-manager-wrapper">
+                <button
+                  @click="openGroupManager(client)"
+                  class="icon-btn add-to-group-btn"
+                  :disabled="savingGroups"
+                  title="Manage groups"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                </button>
+
+                <!-- Multi-Select Group Management Panel -->
+                <div v-if="showGroupManager === client.ip" class="group-manager-panel" @click.stop>
+              <div class="panel-header">
+                <h4>Manage Groups</h4>
+                <button @click="closeGroupManager" class="close-btn">✕</button>
+              </div>
+
+              <input
+                ref="searchInput"
+                v-model="groupSearch"
+                type="text"
+                placeholder="Search groups..."
+                class="group-search"
+                @click.stop
+              />
+
+              <div class="group-list">
+                <div v-if="filteredGroupsForManagement.length === 0" class="no-groups">
+                  {{ groupSearch ? 'No groups found' : 'No groups available' }}
+                </div>
+
+                <label
+                  v-for="group in filteredGroupsForManagement"
+                  :key="group.name"
+                  class="group-checkbox-item"
+                  :class="{
+                    'is-member': selectedGroups.includes(group.name),
+                    'changed': hasGroupChanged(group.name)
+                  }"
+                >
+                  <input
+                    type="checkbox"
+                    :value="group.name"
+                    v-model="selectedGroups"
+                    @click.stop
+                  />
+                  <span class="checkbox-custom"></span>
+                  <div class="group-info">
+                    <span class="group-name">{{ group.name }}</span>
+                    <span class="group-count">{{ group.address?.length || 0 }} members</span>
+                  </div>
+                  <span v-if="hasGroupChanged(group.name)" class="changed-badge">●</span>
+                </label>
+              </div>
+
+              <div class="panel-actions">
+                <button @click="closeGroupManager" class="btn-secondary">Cancel</button>
+                <button
+                  @click="saveGroupMemberships(client)"
+                  class="btn-primary"
+                  :disabled="!hasChanges || savingGroups"
+                >
+                  {{ savingGroups ? 'Saving...' : 'Save Changes' }}
+                </button>
+              </div>
+            </div>
+              </div>
 
               <button
                 @click="toggleBlock(client)"
@@ -101,33 +160,6 @@
                   <path d="M4 4l16 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
               </button>
-            </div>
-
-            <!-- Add to Group Dropdown -->
-            <div v-if="showDropdown === client.ip" class="add-group-dropdown" @click.stop>
-              <input
-                ref="searchInput"
-                v-model="groupSearch"
-                type="text"
-                placeholder="Search groups..."
-                class="group-search"
-                @click.stop
-              />
-              <div class="group-list">
-                <div v-if="filteredGroups.length === 0" class="no-groups">
-                  {{ groupSearch ? 'No groups found' : 'No groups available' }}
-                </div>
-                <div
-                  v-for="group in filteredGroups"
-                  :key="group.name"
-                  :class="['group-item', { disabled: group.isProtected }]"
-                  @click="addToGroup(client.ip, group)"
-                >
-                  <span class="group-name">{{ group.name }}</span>
-                  <span class="group-count">{{ group.address?.length || 0 }} members</span>
-                  <span v-if="group.isProtected" class="protected-label">Protected</span>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -185,8 +217,11 @@ const clients = ref([]);
 const loading = ref(true);
 const error = ref('');
 const processingMAC = ref('');
-const processingAdd = ref('');
-const showDropdown = ref('');
+const showGroupManager = ref(''); // IP of client whose groups are being managed
+const selectedGroups = ref([]); // Currently selected group names
+const originalGroups = ref([]); // Original group memberships (for change detection)
+const savingGroups = ref(false);
+const currentClientIP = ref('');
 const groupSearch = ref('');
 const groups = ref([]);
 const searchInput = ref(null);
@@ -214,13 +249,102 @@ const isIPInDHCPRange = (ip) => {
   return lastOctet >= dhcpStart && lastOctet <= dhcpEnd;
 };
 
-const filteredGroups = computed(() => {
+// Filter groups for management (exclude protected)
+const filteredGroupsForManagement = computed(() => {
+  const PROTECTED = ['BLOCKED', 'WAN', 'LAN'];
   const search = groupSearch.value.toLowerCase();
+
   return groups.value.filter(g =>
-    g.name.toLowerCase().includes(search) ||
-    g.descr?.toLowerCase().includes(search)
+    !PROTECTED.includes(g.name) &&
+    (g.name.toLowerCase().includes(search) || g.descr?.toLowerCase().includes(search))
   );
 });
+
+// Check if there are any changes
+const hasChanges = computed(() => {
+  if (selectedGroups.value.length !== originalGroups.value.length) return true;
+
+  const sorted1 = [...selectedGroups.value].sort();
+  const sorted2 = [...originalGroups.value].sort();
+
+  return sorted1.some((g, i) => g !== sorted2[i]);
+});
+
+// Helper function to check if a group's membership status has changed
+const hasGroupChanged = (groupName) => {
+  const wasSelected = originalGroups.value.includes(groupName);
+  const isSelected = selectedGroups.value.includes(groupName);
+  return wasSelected !== isSelected;
+};
+
+// Open group manager panel for a client
+const openGroupManager = async (client) => {
+  currentClientIP.value = client.ip;
+  showGroupManager.value = client.ip;
+  groupSearch.value = '';
+
+  // Load groups if not already loaded
+  if (groups.value.length === 0) {
+    await fetchGroups();
+  }
+
+  // Fetch client's current group memberships
+  try {
+    const response = await axios.get(`/api/groups/client/${encodeURIComponent(client.ip)}`);
+    if (response.data.success) {
+      const clientGroups = response.data.data || [];
+      selectedGroups.value = [...clientGroups];
+      originalGroups.value = [...clientGroups];
+    }
+  } catch (err) {
+    console.error('Failed to load client groups:', err);
+    selectedGroups.value = [];
+    originalGroups.value = [];
+  }
+
+  // Focus search input
+  await nextTick();
+  searchInput.value?.focus();
+};
+
+// Close group manager panel
+const closeGroupManager = () => {
+  showGroupManager.value = '';
+  selectedGroups.value = [];
+  originalGroups.value = [];
+  groupSearch.value = '';
+  currentClientIP.value = '';
+  savingGroups.value = false;
+};
+
+// Save group membership changes
+const saveGroupMemberships = async (client) => {
+  savingGroups.value = true;
+
+  try {
+    const response = await axios.post(`/api/groups/client/${encodeURIComponent(client.ip)}`, {
+      groups: selectedGroups.value
+    });
+
+    if (response.data.success) {
+      // Close panel on success
+      closeGroupManager();
+
+      // Show success message
+      const successMsg = `Updated group memberships for ${client.hostname || client.ip}`;
+      error.value = successMsg;
+      setTimeout(() => {
+        if (error.value === successMsg) error.value = '';
+      }, 3000);
+    } else {
+      error.value = response.data.error || 'Failed to update groups';
+    }
+  } catch (err) {
+    error.value = err.response?.data?.error || 'Failed to update groups';
+  } finally {
+    savingGroups.value = false;
+  }
+};
 
 const fetchClients = async () => {
   loading.value = true;
@@ -281,55 +405,11 @@ const fetchGroups = async () => {
   }
 };
 
-const toggleAddToGroup = async (client) => {
-  if (showDropdown.value === client.ip) {
-    showDropdown.value = '';
-    groupSearch.value = '';
-  } else {
-    showDropdown.value = client.ip;
-    groupSearch.value = '';
-    if (groups.value.length === 0) {
-      await fetchGroups();
-    }
-    await nextTick();
-    searchInput.value?.[0]?.focus();
-  }
-};
-
-const addToGroup = async (clientIp, group) => {
-  if (group.isProtected) return;
-
-  processingAdd.value = clientIp;
-  showDropdown.value = '';
-
-  try {
-    const response = await axios.post(`/api/groups/${group.name}/members`, {
-      member: clientIp
-    });
-
-    if (response.data.success) {
-      error.value = '';
-      // Show success message briefly
-      const successMsg = `Added to ${group.name}`;
-      error.value = successMsg;
-      setTimeout(() => {
-        if (error.value === successMsg) error.value = '';
-      }, 3000);
-    } else {
-      error.value = response.data.error || 'Failed to add to group';
-    }
-  } catch (err) {
-    error.value = err.response?.data?.error || 'Failed to add to group';
-  } finally {
-    processingAdd.value = '';
-    groupSearch.value = '';
-  }
-};
-
 const handleClickOutside = (event) => {
-  if (showDropdown.value && !event.target.closest('.add-group-dropdown') && !event.target.closest('.add-to-group-btn')) {
-    showDropdown.value = '';
-    groupSearch.value = '';
+  // Handle group manager panel
+  if (showGroupManager.value && !event.target.closest('.group-manager-wrapper')) {
+    // Auto-close the panel
+    closeGroupManager();
   }
 };
 
@@ -676,6 +756,12 @@ export default {
   to { transform: rotate(360deg); }
 }
 
+/* Group Manager Wrapper */
+.group-manager-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
 /* Block button */
 .block-btn.blocked {
   background: var(--success-color);
@@ -697,8 +783,8 @@ export default {
   background: #dc2626;
 }
 
-/* Add to Group Dropdown */
-.add-group-dropdown {
+/* Group Manager Panel */
+.group-manager-panel {
   position: absolute;
   top: 100%;
   right: 0;
@@ -707,11 +793,41 @@ export default {
   border: 1px solid var(--border-color);
   border-radius: 0.5rem;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-  width: 300px;
-  max-height: 400px;
+  width: 320px;
+  max-height: 500px;
   display: flex;
   flex-direction: column;
   z-index: 50;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.panel-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  padding: 0.25rem;
+  cursor: pointer;
+  transition: color 0.2s;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
 }
 
 .group-search {
@@ -720,10 +836,7 @@ export default {
   border-bottom: 1px solid var(--border-color);
   font-size: 0.875rem;
   outline: none;
-  position: sticky;
-  top: 0;
   background: white;
-  border-radius: 0.5rem 0.5rem 0 0;
 }
 
 .group-search:focus {
@@ -732,7 +845,8 @@ export default {
 
 .group-list {
   overflow-y: auto;
-  max-height: 350px;
+  max-height: 300px;
+  padding: 0.5rem;
 }
 
 .no-groups {
@@ -742,33 +856,96 @@ export default {
   font-size: 0.875rem;
 }
 
-.group-item {
-  padding: 0.75rem 1rem;
+.group-checkbox-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.375rem;
   cursor: pointer;
-  transition: background 0.2s;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.group-item:last-child {
-  border-bottom: none;
-}
-
-.group-item:hover:not(.disabled) {
+  transition: all 0.2s;
+  margin-bottom: 0.5rem;
   background: var(--bg-gray);
+  position: relative;
 }
 
-.group-item.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.group-checkbox-item:last-child {
+  margin-bottom: 0;
+}
+
+.group-checkbox-item:hover {
+  background: #e5e7eb;
+}
+
+/* Blue background for member groups */
+.group-checkbox-item.is-member {
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+}
+
+.group-checkbox-item.is-member:hover {
+  background: #bfdbfe;
+}
+
+/* Yellow background for changed groups */
+.group-checkbox-item.changed {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+}
+
+.group-checkbox-item.changed:hover {
+  background: #fde68a;
+}
+
+/* Hide default checkbox */
+.group-checkbox-item input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+/* Custom checkbox */
+.checkbox-custom {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--border-color);
+  border-radius: 0.25rem;
+  background: white;
+  flex-shrink: 0;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.group-checkbox-item input[type="checkbox"]:checked ~ .checkbox-custom {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.group-checkbox-item input[type="checkbox"]:checked ~ .checkbox-custom::after {
+  content: '';
+  position: absolute;
+  left: 0.375rem;
+  top: 0.125rem;
+  width: 0.375rem;
+  height: 0.625rem;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.group-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .group-name {
-  flex: 1;
   font-weight: 500;
   font-size: 0.875rem;
+  color: var(--text-primary);
 }
 
 .group-count {
@@ -776,10 +953,58 @@ export default {
   color: var(--text-secondary);
 }
 
-.protected-label {
-  font-size: 0.75rem;
-  color: var(--danger-color);
-  font-weight: 600;
+.changed-badge {
+  color: #f59e0b;
+  font-size: 1rem;
+  margin-left: 0.25rem;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-gray);
+  border-radius: 0 0 0.5rem 0.5rem;
+}
+
+.btn-secondary {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  background: white;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-gray);
+}
+
+.btn-primary {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Static IP Button */

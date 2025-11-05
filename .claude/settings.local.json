@@ -10,7 +10,12 @@
       "Bash(docker exec:*)",
       "Bash(curl -k -X GET http://localhost:8080/api/pfsense/aliases -H 'Authorization: Bearer changeme')",
       "Bash(curl:*)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(echo:*)",
+      "Bash(ls:*)",
+      "Bash(awk:*)",
+      "WebSearch",
+      "Bash(docker logs:*)"
     ],
     "deny": [],
     "ask": []
