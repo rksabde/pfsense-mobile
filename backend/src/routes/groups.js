@@ -246,13 +246,13 @@ router.post('/client/:identifier', async (req, res) => {
 
         // Add member if needed
         if (shouldBeMember && !isMember) {
-          await pfsense.addMemberToGroup(alias.name, identifier);
+          await pfsense.addMemberToAlias(alias.name, identifier);
           return { group: alias.name, action: 'added' };
         }
 
         // Remove member if needed
         if (!shouldBeMember && isMember) {
-          await pfsense.removeMemberFromGroup(alias.name, identifier);
+          await pfsense.removeMemberFromAlias(alias.name, identifier);
           return { group: alias.name, action: 'removed' };
         }
 
